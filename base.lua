@@ -474,13 +474,13 @@ function courseplay:onLoad(savegame)
 	self.cp.settings:addSetting(LevelCompactShieldHeightSetting,self)
 	self.cp.settings:addSetting(BunkerSpeedSetting,self)
 	self.cp.settings:addSetting(LevelCompactSiloTypSetting,self)
-	
+	self.cp.settings:addSetting(UnloadLeftOrRightSetting,self)
 	---@type SettingsContainer
 	self.cp.courseGeneratorSettings = SettingsContainer("courseGeneratorSettings")
 	self.cp.courseGeneratorSettings:addSetting(CenterModeSetting, self)
 	self.cp.courseGeneratorSettings:addSetting(NumberOfRowsPerLandSetting, self)
 	self.cp.courseGeneratorSettings:addSetting(HeadlandOverlapPercent, self)
-	
+	self.cp.courseGeneratorSettings:addSetting(ShowSeedCalculatorSetting, self)
 	courseplay.signs:updateWaypointSigns(self);
 	
 	courseplay:setAIDriver(self, self.cp.mode)

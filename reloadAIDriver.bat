@@ -13,6 +13,9 @@ type BaleWrapperAIDriver.lua >> %outfile%
 type BalerAIDriver.lua >> %outfile%
 type CombineAIDriver.lua >> %outfile%
 type CombineUnloadAIDriver.lua >> %outfile%
-type OverloaderAIDriver.lua >> %outfile%
+type ShovelModeAIDriver.lua >> %outfile%
+type TriggerShovelModeAIDriver.lua >> %outfile%
+type StationaryShovelAIDriver.lua >> %outfile%
+type LevelCompactAIDriver.lua >> %outfile%
 echo ]]^> >> %outfile%
 echo ^</code^> >> %outfile%

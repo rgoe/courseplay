@@ -56,6 +56,8 @@ ShovelModeAIDriver.myStates = {
 	STATE_WAIT_FOR_TARGET = {},
 	STATE_START_UNLOAD = {},
 	STATE_WAIT_FOR_UNLOADREADY = {},
+	STATE_START_UNLOAD_TRAILER = {},
+	STATE_WAIT_FOR_UNLOADREADY_TRAILER = {},
 	STATE_GO_BACK_FROM_EMPTYPOINT = {},
 	STATE_WORK_FINISHED = {}
 }
@@ -69,14 +71,18 @@ function ShovelModeAIDriver:init(vehicle)
 	--self.mode = courseplay.MODE_SHOVEL_FILL_AND_EMPTY
 	self.shovelState = self.states.STATE_TRANSPORT
 	self.refSpeed = 15
-	self.foundTrailer = nil
 end
 
 function ShovelModeAIDriver.create(vehicle)
-	if vehicle.cp.settings.shovelModeAIDriverTriggerHandlerIsActive:is(false) then
-		return ShovelModeAIDriver(vehicle)
+	if SpecializationUtil.hasSpecialization(ConveyorBelt,vehicle.specializations) then 
+		--currently disabled in ValidModeSetup.xml, as this one is still in WIP!
+		return StationaryShovelAIDriver(vehicle)
 	else
-		return TriggerShovelModeAIDriver(vehicle)
+		if vehicle.cp.settings.shovelModeAIDriverTriggerHandlerIsActive:is(false) then
+			return ShovelModeAIDriver(vehicle)
+		else
+			return TriggerShovelModeAIDriver(vehicle)
+		end
 	end
 end
 
@@ -101,11 +107,10 @@ function ShovelModeAIDriver:start()
 	self.shovelFillStartPoint = nil
 	self.shovelFillEndPoint = nil
 	self.shovelEmptyPoint = nil
-	self.mode9SavedLastFillLevel = 0;
 	local numWaitPoints = 0
-	self.targetSilo = nil
 	self.bestTarget = nil
-	self.bunkerSilo = nil
+	self.bunkerSiloManager = nil
+	self.unloadingObjectRaycastActive = false
 	for i,wp in pairs(vehicle.Waypoints) do
 		if wp.wait then
 			numWaitPoints = numWaitPoints + 1;
@@ -180,7 +185,7 @@ function ShovelModeAIDriver:drive(dt)
 			if self.bunkerSiloManager == nil then 
 				local silo,isHeap = BunkerSiloManagerUtil.getTargetBunkerSilo(self.vehicle,nil,true)
 				if silo then 
-					self.bunkerSiloManager =  BunkerSiloManager(self.vehicle, silo, self:getWorkWidth(),self.shovel,isHeap)
+					self.bunkerSiloManager =  BunkerSiloManager(self.vehicle, silo, self:getWorkWidth(),self.shovel.rootNode,isHeap)
 				end
 			end
 			if self.bunkerSiloManager and self.bestTarget == nil then
@@ -268,12 +273,18 @@ function ShovelModeAIDriver:drive(dt)
 	-- close to the unload waitpoint, so set pre unload shovel position and do a raycast for unload triggers, trailers
 	elseif self.shovelState == self.states.STATE_WAIT_FOR_TARGET then
 		self:driveWaitForTarget(dt)
-	-- drive to the unload trigger/ trailer
+	-- drive to the unload at trigger
 	elseif self.shovelState == self.states.STATE_START_UNLOAD then
 		notAllowedToDrive =	self:driveStartUnload(dt)
-	-- handle unloading
+	-- handle unloading at trigger
 	elseif self.shovelState == self.states.STATE_WAIT_FOR_UNLOADREADY then
 		self:driveWaitForUnloadReady(dt)
+	-- drive to the unload at trailer
+	elseif self.shovelState == self.states.STATE_START_UNLOAD_TRAILER then
+		notAllowedToDrive =	self:driveStartUnloadTrailer(dt)
+	-- handle unloading at trailer
+	elseif self.shovelState == self.states.STATE_WAIT_FOR_UNLOADREADY_TRAILER then
+		self:driveWaitForUnloadReadyTrailer(dt)
 	-- reverse back to the course
 	elseif self.shovelState == self.states.STATE_GO_BACK_FROM_EMPTYPOINT then
 		self:driveGoBackFromEmptyPoint(dt)
@@ -288,6 +299,13 @@ function ShovelModeAIDriver:drive(dt)
 	end
 	self:resetSpeed()
 	self:checkLastWaypoint()
+end
+
+function ShovelModeAIDriver:updateTick(dt)
+	AIDriver.updateTick(self,dt)
+	if self:isUnloadingObjectRaycastActive() then 
+		self:searchForUnloadingObjectRaycast()
+	end
 end
 
 function ShovelModeAIDriver:isStuck()
@@ -321,11 +339,14 @@ function ShovelModeAIDriver:driveWaitForTarget(dt)
 	end
 	if self:setShovelToPositionFinshed(4,dt) then
 		--search for UnloadStation(UnloadTrigger) or correct Trailer ahead, else wait
-		self:searchForUnloadingObjectRaycast()
+		self.unloadingObjectRaycastActive = true
+		--self:searchForUnloadingObjectRaycast()
 	end
 end
--- drive to the unload trigger/ trailer
+---trigger
+-- drive to the unload trigger
 function ShovelModeAIDriver:driveStartUnload(dt)
+	self.unloadingObjectRaycastActive = false
 	self.refSpeed = self:getDriveStartUnloadRefSpeed()
 	local currentDischargeNode = self.shovel:getCurrentDischargeNode()
 	-- if shovel is empty we can return direct back from the trigger
@@ -333,7 +354,7 @@ function ShovelModeAIDriver:driveStartUnload(dt)
 		self:setShovelState(self.states.STATE_WAIT_FOR_UNLOADREADY);
 	end
 	-- if we can discharge at unload trigger or trailer has enough free space
-	if self.shovel:getCanDischargeToObject(currentDischargeNode) and currentDischargeNode.dischargeObject and (self:hasEnoughSpaceInObject(currentDischargeNode) or self.foundTrailer) then
+	if self.shovel:getCanDischargeToObject(currentDischargeNode) and currentDischargeNode.dischargeObject and self:hasEnoughSpaceInObject(currentDischargeNode) then
 		if self:setShovelToPositionFinshed(5,dt) then
 			self:setShovelState(self.states.STATE_WAIT_FOR_UNLOADREADY);
 		end;
@@ -342,10 +363,10 @@ function ShovelModeAIDriver:driveStartUnload(dt)
 	elseif currentDischargeNode.dischargeObject or currentDischargeNode.dischargeFailedReason == Dischargeable.DISCHARGE_REASON_NO_FREE_CAPACITY then 
 		self:setShovelToPositionFinshed(4,dt)
 		self:hold()
-	--drive in straight line to waitPoint is UnloadStation(UnloadTrigger) or correct Trailer was found
+	--drive in straight line to waitPoint/UnloadStation(UnloadTrigger) 
 	elseif not self:getIsShovelEmpty() then 
 		if self.course:getDistanceToNextWaypoint(self.shovelEmptyPoint) <2 then 
-			-- the last 2m we drive straight to the unload trigger/ trailer
+			-- the last 2m we drive straight to the unload trigger
 			notAllowedToDrive = true
 			local gx, _, gz = self.course:getWaypointLocalPosition(self:getDirectionNode(),self.shovelEmptyPoint)
 			self:driveVehicleToLocalPosition(dt, true, true, gx, gz, self.refSpeed)
@@ -353,22 +374,64 @@ function ShovelModeAIDriver:driveStartUnload(dt)
 	end
 	return notAllowedToDrive
 end
+
 -- handle unloading
 function ShovelModeAIDriver:driveWaitForUnloadReady(dt)
 	self:hold()
 	local dischargeNode = self.shovel:getCurrentDischargeNode()		
 	-- drive back to the course
-	if self:getIsShovelEmpty() or not self.shovel:getCanDischargeToObject(dischargeNode) and self.foundTrailer then
+	if self:getIsShovelEmpty() then
 		if self:setShovelToPositionFinshed(4,dt) then
 			local newPoint = self.course:getNextRevWaypointIxFromVehiclePosition(self.ppc:getCurrentWaypointIx(), self.vehicle.cp.directionNode, 3 )
 			self.ppc:initialize(newPoint)
 			self:setShovelState(self.states.STATE_GO_BACK_FROM_EMPTYPOINT);
 		end
 	--stop unloading at unload trigger if there is no more free space
-	elseif (not self.shovel:getCanDischargeToObject(dischargeNode) or self:almostFullObject(dischargeNode)) and not self.foundTrailer then
+	elseif (not self.shovel:getCanDischargeToObject(dischargeNode) or self:almostFullObject(dischargeNode))  then
 		self:setShovelState(self.states.STATE_START_UNLOAD);
 	end		
 end
+
+------trailer
+-- drive to the unload trigger/ trailer
+function ShovelModeAIDriver:driveStartUnloadTrailer(dt)
+	self.unloadingObjectRaycastActive = false
+	self.refSpeed = self:getDriveStartUnloadRefSpeed()
+	local dischargeNode = self.shovel:getCurrentDischargeNode()
+	-- if we can discharge at trailer 
+	if self.shovel:getCanDischargeToObject(dischargeNode) and dischargeNode.dischargeObject then
+		if self:setShovelToPositionFinshed(5,dt) then
+			self:setShovelState(self.states.STATE_WAIT_FOR_UNLOADREADY_TRAILER);
+		end;
+		self:hold()
+	--drive in straight line to waitPoint/trailer 
+	elseif not self:getIsShovelEmpty() then 
+		if self.course:getDistanceToNextWaypoint(self.shovelEmptyPoint) <2 then 
+			-- the last 2m we drive straight to the unload trailer
+			notAllowedToDrive = true
+			local gx, _, gz = self.course:getWaypointLocalPosition(self:getDirectionNode(),self.shovelEmptyPoint)
+			self:driveVehicleToLocalPosition(dt, true, true, gx, gz, self.refSpeed)
+		end
+	end
+	return notAllowedToDrive
+end
+
+-- handle unloading
+function ShovelModeAIDriver:driveWaitForUnloadReadyTrailer(dt)
+	self:hold()
+	local dischargeNode = self.shovel:getCurrentDischargeNode()		
+	--drive back to the course
+	if self:getIsShovelEmpty() or not self.shovel:getCanDischargeToObject(dischargeNode) or dischargeNode.dischargeFailedReason == Dischargeable.DISCHARGE_REASON_NO_FREE_CAPACITY  then
+		if self:setShovelToPositionFinshed(4,dt) then
+			local newPoint = self.course:getNextRevWaypointIxFromVehiclePosition(self.ppc:getCurrentWaypointIx(), self.vehicle.cp.directionNode, 3 )
+			self.ppc:initialize(newPoint)
+			self:setShovelState(self.states.STATE_GO_BACK_FROM_EMPTYPOINT);
+		end
+	end
+end
+
+------
+
 -- reverse back to the course
 function ShovelModeAIDriver:driveGoBackFromEmptyPoint(dt)
 	self.refSpeed = self.vehicle.cp.speeds.reverse
@@ -379,7 +442,6 @@ function ShovelModeAIDriver:driveGoBackFromEmptyPoint(dt)
 			self:setShovelState(self.states.STATE_TRANSPORT)
 		end
 	end
-	self.foundTrailer=nil
 end
 --bunker silo/ heap is empty 
 function ShovelModeAIDriver:driveWorkFinished(dt)
@@ -497,6 +559,10 @@ function ShovelModeAIDriver:iAmBeforeEmptyPoint()
 	return self.ppc:getCurrentWaypointIx() < self.shovelEmptyPoint
 end
 
+function ShovelModeAIDriver:isUnloadingObjectRaycastActive()
+	return self.unloadingObjectRaycastActive
+end
+
 -- raycast for unloading trigger or trailer at the shovelEmptyPoint
 function ShovelModeAIDriver:searchForUnloadingObjectRaycast()
 	local ix = self.shovelEmptyPoint
@@ -543,8 +609,7 @@ function ShovelModeAIDriver:searchForUnloadingObjectRaycastCallback(transformId,
 							--valid trailer/ fillableObject found
 							self:debug("supportedFillType")
 							self:debug("Trailer found!")
-							self:setShovelState(self.states.STATE_START_UNLOAD)
-							self.foundTrailer = true
+							self:setShovelState(self.states.STATE_START_UNLOAD_TRAILER)
 							return
 						else
 							self:debug("not  supportedFillType")

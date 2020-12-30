@@ -244,6 +244,8 @@
 				<Specialization name="spec_trailer"/>
 				<Specialization name="spec_fillTriggerVehicle"/>
 				<Specialization name="spec_waterTrailer"/>
+				<!--currently disabled, as StationaryShovelAIDriver is still WIP!-->
+				<Specialization name="spec_conveyorBelt"/> 
 			</Setup>
 		</DisallowedSetups>
 	</Mode>
@@ -286,6 +288,8 @@
 				<Specialization name="spec_trailer"/>
 				<Specialization name="spec_fillTriggerVehicle"/>
 				<Specialization name="spec_waterTrailer"/>
+				
+				<Specialization name="spec_conveyorBelt"/> 
 			</Setup>
 		</DisallowedSetups>
 	</Mode>

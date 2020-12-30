@@ -1299,6 +1299,10 @@ function Setting:set(value)
 	self.value = value
 end
 
+function Setting:changeByX(value)
+	self.value = value
+end
+
 function Setting:onChange()
 	-- setting specific implementation in the derived classes
 end
@@ -1328,6 +1332,11 @@ end
 --- Should this setting be disabled on the GUI?
 function Setting:isDisabled()
 	return false
+end
+
+-- callback function for hud buttons
+function Setting:hudButtonCallBack(parameter)
+	self:changeByX(parameter)
 end
 
 ---@class FloatSetting
@@ -1797,13 +1806,11 @@ IntSettingScientific = CpObject(IntSetting)
 --- @param POWER float changes int value by const POWER 
 function IntSettingScientific:init(name, label, toolTip, vehicle,MIN,MAX,POWER)
 	IntSetting.init(self, name, label, toolTip, vehicle,MIN,MAX)
-	self.MAX = MAX
-	self.MIN = MIN
 	self.POWER = POWER
 end
 
-function IntSettingScientific:getText()
-	return tostring(self:getFixedValue())
+function IntSettingScientific:get()
+	return IntSetting.get(self)*self.POWER
 end
 
 -- get the fixed value with self.POWER
@@ -1811,7 +1818,17 @@ function IntSettingScientific:getFixedValue()
 	return self:get()*self.POWER
 end
 
+function IntSettingScientific:saveToXml(xml, parentKey)
+	setXMLInt(xml, self:getKey(parentKey), IntSetting.get(self))
+end
 
+function IntSettingScientific:onWriteStream(stream)
+	streamDebugWriteInt32(stream, IntSetting.get(self))
+end
+
+function IntSetting:changeByX(x)
+	self:set(IntSetting.get(self)+x)
+end
 
 --- AutoDrive mode setting
 ---@class AutoDriveModeSetting : SettingList
@@ -1997,6 +2014,14 @@ function HeadlandOverlapPercent:init(vehicle)
 			values, texts)
 	-- reasonable default used for years
 	self:set(7)
+end
+
+--- Number of rows per land in Lands center mode
+---@class ShowSeedCalculatorSetting : BooleanSetting
+ShowSeedCalculatorSetting = CpObject(BooleanSetting)
+function ShowSeedCalculatorSetting:init(vehicle)
+	BooleanSetting.init(self, 'showSeedCalculator', 'COURSEPLAY_SEEDUSAGECALCULATOR','COURSEPLAY_SEEDUSAGECALCULATOR', vehicle)
+	self:set(false)
 end
 
 --- Course generator settings (read from the XML, may be added to the UI later when needed):
@@ -4020,7 +4045,28 @@ function LevelCompactShieldHeightSetting:isDisabled()
 	return self.vehicle.cp.settings.levelCompactMode:get() == LevelCompactModeSetting.COMPACTING
 end
 
---[[
+---@class UnloadLeftOrRightSetting : BooleanSetting
+UnloadLeftOrRightSetting = CpObject(BooleanSetting)
+UnloadLeftOrRightSetting.RIGHT = false
+UnloadLeftOrRightSetting.LEFT = true
+function UnloadLeftOrRightSetting:init(vehicle)
+	local texts = {
+		'COURSEPLAY_RIGHT',
+		'COURSEPLAY_LEFT',
+	}
+	BooleanSetting.init(self,'unloadLeftOrRight','COURSEPLAY_UNLOADING_SIDE','COURSEPLAY_UNLOADING_SIDE',vehicle,texts)
+	self:set(UnloadLeftOrRightSetting.RIGHT)
+end
+
+--[[ Settings leftover for the hud	 
+
+---@class UseAlignmentWaypointSetting : BooleanSetting
+UseAlignmentWaypointSetting = CpObject(BooleanSetting)
+function UseAlignmentWaypointSetting:init(vehicle)
+	BooleanSetting.init(self,'useAlignmentWaypoint','COURSEPLAY_ALIGNMENT_WAYPOINT','COURSEPLAY_ALIGNMENT_WAYPOINT',vehicle)
+	self:set(true)
+end
+
 ---@class SearchCombineAutomaticallySetting : BooleanSetting
 SearchCombineAutomaticallySetting = CpObject(BooleanSetting)
 function SearchCombineAutomaticallySetting:init(vehicle)
@@ -4035,8 +4081,124 @@ function ShowSelectedFieldEdgePathSetting:init(vehicle)
 	self:set(false)
 end
 
+---@class WaitTimeSetting : SettingList
+WaitTimeSetting = CpObject(SettingList)
+WaitTimeSetting.MAX = 300
+WaitTimeSetting.INCREMENT = 5
+function WaitTimeSetting:init(vehicle)
+	local texts = {}
+	local values = {}
+	values[1] = 0
+	texts[1] = '---'
+	for i=self.INCREMENT,self.MAX,self.INCREMENT do 
+		table.insert(values,i)
+		local minutes = math.floor(t/60)
+		local seconds = t % 60
+		local text
+		if minutes > 0 then 
+			text = courseplay:loc('COURSEPLAY_MINUTES'):format(minutes)
+			if seconds > 0 then
+				text = text .. ', '..courseplay:loc('COURSEPLAY_SECONDS'):format(seconds)
+			end
+		else
+			text = courseplay:loc('COURSEPLAY_SECONDS'):format(seconds);
+		end
+		table.insert(texts,text)
+	end
+	SettingList.init(self, 'waitTime','COURSEPLAY_WAITING_TIME', 'COURSEPLAY_WAITING_TIME', vehicle,values,texts) 
+	self:set(0)
+end
+
+
+---@class LoadUnloadOffsetXSetting : IntSettingScientific
+LoadUnloadOffsetXSetting = CpObject(IntSettingScientific)
+function LoadUnloadOffsetXSetting:init(vehicle)
+	IntSettingScientific.init(self, 'loadUnloadOffsetX','COURSEPLAY_LOAD_UNLOAD_OFFSET_X', 'COURSEPLAY_LOAD_UNLOAD_OFFSET_X', vehicle,-10,10,0.1) 
+	self:set(0)
+end
+
+---@class LoadUnloadOffsetZSetting : IntSettingScientific
+LoadUnloadOffsetZSetting = CpObject(IntSettingScientific)
+function LoadUnloadOffsetZSetting:init(vehicle)
+	IntSettingScientific.init(self, 'loadUnloadOffsetZ','COURSEPLAY_LOAD_UNLOAD_OFFSET_Z', 'COURSEPLAY_LOAD_UNLOAD_OFFSET_Z', vehicle,-10,10,0.1) 
+	self:set(0)
+end
+
+---@class TurnDiameterSetting : IntSettingScientific
+TurnDiameterSetting = CpObject(IntSettingScientific)
+function TurnDiameterSetting:init(vehicle)
+	IntSettingScientific.init(self, 'turnDiameter','COURSEPLAY_TURN_RADIUS', 'COURSEPLAY_TURN_RADIUS', vehicle,0,10,0.1) 
+	self:set(0)
+end
+
+---@class WorkWidthSetting : IntSettingScientific
+WorkWidthSetting = CpObject(IntSettingScientific)
+function WorkWidthSetting:init(vehicle)
+	IntSettingScientific.init(self, 'workWidth','COURSEPLAY_WORK_WIDTH', 'COURSEPLAY_WORK_WIDTH', vehicle,0,100,0.1) 
+	self:set(0)
+end
+
+---@class LaneNumberSetting : IntSetting
+LaneNumberSetting = CpObject(IntSetting)
+function LaneNumberSetting:init(vehicle)
+	IntSetting.init(self, 'laneNumber','COURSEPLAY_LANE_OFFSET', 'COURSEPLAY_LANE_OFFSET', vehicle,0,10) 
+	self:set(0)
+end
+
+---@class LaneOffsetSetting : IntSettingScientific
+LaneOffsetSetting = CpObject(IntSettingScientific)
+function LaneOffsetSetting:init(vehicle)
+	IntSettingScientific.init(self, 'laneOffset','COURSEPLAY_LANE_OFFSET', 'COURSEPLAY_LANE_OFFSET', vehicle,-10,10,0.1) 
+	self:set(0)
+end
+
+---@class ToolOffsetXSetting : IntSettingScientific
+ToolOffsetXSetting = CpObject(IntSettingScientific)
+function ToolOffsetXSetting:init(vehicle)
+	IntSettingScientific.init(self, 'toolOffsetX','COURSEPLAY_TOOL_OFFSET_X', 'COURSEPLAY_TOOL_OFFSET_X', vehicle,-10,10,0.1) 
+	self:set(0)
+end
+
+---@class ToolOffsetZSetting : IntSettingScientific
+ToolOffsetZSetting = CpObject(IntSettingScientific)
+function ToolOffsetZSetting:init(vehicle)
+	IntSettingScientific.init(self, 'toolOffsetZ','COURSEPLAY_TOOL_OFFSET_Z', 'COURSEPLAY_TOOL_OFFSET_Z', vehicle,-10,10,0.1) 
+	self:set(0)
+end
+
+---@class HeadlandReverseManeuverTypeSetting : SettingList
+HeadlandReverseManeuverTypeSetting = CpObject(SettingList)
+HeadlandReverseManeuverTypeSetting.STRAIGHT = 1
+HeadlandReverseManeuverTypeSetting.CURVE = 2
+function HeadlandReverseManeuverTypeSetting:init(vehicle)
+	local texts = {
+		'COURSEPLAY_HEADLAND_REVERSE_MANEUVER_TYPE_STRAIGHT',
+		'COURSEPLAY_HEADLAND_REVERSE_MANEUVER_TYPE_CURVE' 
+	}
+	local values = {
+		self.STRAIGHT,
+		self.CURVE
+	}
+	SettingList.init(self, 'headlandReverseManeuverType','COURSEPLAY_HEADLAND_REVERSE_MANEUVER_TYPE', 'COURSEPLAY_HEADLAND_REVERSE_MANEUVER_TYPE', vehicle,values,texts) 
+	self:set(1)
+end
+
+---@class CombineOffsetSetting : IntSettingScientific
+CombineOffsetSetting = CpObject(IntSettingScientific)
+function CombineOffsetSetting:init(vehicle)
+	IntSettingScientific.init(self, 'combineOffset','COURSEPLAY_COMBINE_OFFSET_HORIZONTAL', 'COURSEPLAY_COMBINE_OFFSET_HORIZONTAL', vehicle,-10,10,0.1) 
+	self:set(0)
+end
+
+---@class TrailerOffsetSetting : IntSettingScientific
+TrailerOffsetSetting = CpObject(IntSettingScientific)
+function TrailerOffsetSetting:init(vehicle)
+	IntSettingScientific.init(self, 'trailerOffset','COURSEPLAY_COMBINE_OFFSET_VERTICAL', 'COURSEPLAY_COMBINE_OFFSET_VERTICAL', vehicle,-10,10,0.1) 
+	self:set(0)
+end
 
 ]]--
+
 
 --- Container for settings
 --- @class SettingsContainer

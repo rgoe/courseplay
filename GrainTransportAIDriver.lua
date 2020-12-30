@@ -19,12 +19,20 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 ---@class GrainTransportAIDriver : AIDriver
 GrainTransportAIDriver = CpObject(AIDriver)
 
+GrainTransportAIDriver.myStates = {
+	LOADING_AT_TRIGGER = {checkForTrafficConflict = true, enableProximitySpeedControl = true, enableProximitySwerve = true},
+	LOADING_AT_START = {checkForTrafficConflict = true},
+	LOADING_BY_STATIONARY_AIDRIVER = {}
+}
+
 --- Constructor
 function GrainTransportAIDriver:init(vehicle)
 	courseplay.debugVehicle(11,vehicle,'GrainTransportAIDriver:init()')
 	AIDriver.init(self, vehicle)
+	self:initStates(self.myStates)
 	self.mode = courseplay.MODE_GRAIN_TRANSPORT
 	self.totalFillCapacity = 0
+	self.loadingMode = self.states.LOADING_AT_TRIGGER
 end
 
 function GrainTransportAIDriver:setHudContent()
@@ -40,6 +48,8 @@ function GrainTransportAIDriver:start(startingPoint)
 	self.vehicle.cp.settings.stopAtEnd:set(false)
 	self.firstWaypointNode = WaypointNode('firstWaypoint')
 	self.firstWaypointNode:setToWaypoint(self.course, 1, true)
+	self:resetTemporaryGoalNode()
+	self.loadingMode = self.states.LOADING_AT_TRIGGER
 end
 
 function GrainTransportAIDriver:isAlignmentCourseNeeded(ix)
@@ -69,19 +79,25 @@ function GrainTransportAIDriver:drive(dt)
 	local allowedToDrive = true
 	if self:getSiloSelectedFillTypeSetting():isEmpty() then 
 		courseplay:setInfoText(self.vehicle, "COURSEPLAY_MANUAL_LOADING")
+		if self:hasTemporaryGoalNode() then 
+			self.loadingMode = self.states.LOADING_BY_STATIONARY_AIDRIVER
+		else 
+			self.loadingMode = self.states.LOADING_AT_START
+		end		
 		--checking FillLevels, while loading at StartPoint 
 		if self.readyToLoadManualAtStart then 
 			self:setInfoText('REACHED_OVERLOADING_POINT')			
 			self:checkFillUnits()
 			if self.nextClosestExactFillRootNode then 
 				--drive until the closest exactFillRootNode/fillUnit is at the first Waypoint
-				self:setSpeed(3)
 				if self.nextClosestExactFillRootNodeDistance == nil then
 					 self.nextClosestExactFillRootNodeDistance = math.huge
 				end
-				local d = calcDistanceFrom(self.firstWaypointNode.node, self.nextClosestExactFillRootNode)
+				local d = calcDistanceFrom(self:getReadyToLoadManualAtStartNode(), self.nextClosestExactFillRootNode)
 				if d < self.nextClosestExactFillRootNodeDistance then 
 					self.nextClosestExactFillRootNodeDistance = d
+					local speed = math.max(self:getReadyToLoadManualAtStartNodeSpeed(),math.ceil(d/2))
+					self:setSpeed(speed)
 				else 
 					self:hold()
 				end
@@ -91,6 +107,8 @@ function GrainTransportAIDriver:drive(dt)
 		else
 			self:clearInfoText('REACHED_OVERLOADING_POINT')
 		end	
+	else 
+		self.loadingMode = self.states.LOADING_AT_TRIGGER
 	end
 
 	if self:isNearFillPoint() then
@@ -195,7 +213,7 @@ function GrainTransportAIDriver:checkFillUnits()
 			totalFillLevel = totalFillLevel + fillUnitData.fillLevel
 			--get the closest exactFillRootNode/fillUnit 
 			if fillUnitData.exactFillRootNode and fillUnitData.fillLevel/fillUnitData.capacity*100 < 99 then 
-				local d = calcDistanceFrom(self.firstWaypointNode.node, fillUnitData.exactFillRootNode)
+				local d = calcDistanceFrom(self:getReadyToLoadManualAtStartNode(), fillUnitData.exactFillRootNode)
 				if d < distance then
 					distance = d
 					nextClosestExactFillRootNode = fillUnitData.exactFillRootNode
@@ -209,6 +227,7 @@ function GrainTransportAIDriver:checkFillUnits()
 	end		
 	if g_updateLoopIndex % 2 == 0 and self:isFillLevelReached(totalFillLevel) and self.lastTotalFillLevel and self.lastTotalFillLevel == totalFillLevel then 
 		self.readyToLoadManualAtStart = false
+		self:resetTemporaryGoalNode()
 		self.nextClosestExactFillRootNode = nil
 		local totalFillUnitsData = {}
 		self:getFillUnitInfo(self.vehicle,totalFillUnitsData)
@@ -249,6 +268,7 @@ function GrainTransportAIDriver:setDriveNow()
 	self.driveNow = true
 	self.readyToLoadManualAtStart = false
 	self.nextClosestExactFillRootNode = nil
+	self:resetTemporaryGoalNode()
 	AIDriver.setDriveNow(self)
 end
 
@@ -261,6 +281,8 @@ function GrainTransportAIDriver:stop(stopMsg)
 		self.firstWaypointNode:destroy()
 	end
 	self.nextClosestExactFillRootNode = nil
+	self.readyToLoadManualAtStart = false
+	self:resetTemporaryGoalNode()
 	AIDriver.stop(self,stopMsg)
 end
 
@@ -269,4 +291,87 @@ function GrainTransportAIDriver:delete()
 		self.firstWaypointNode:destroy()
 	end
 	AIDriver.delete(self)
+end
+
+function GrainTransportAIDriver:getReadyToLoadManualAtStartNode()
+	return self.temporaryReadyToLoadManualAtStartNode or self.firstWaypointNode.node
+end
+
+---set a temporary goal node for the nextClosestFillExactRootNode
+---node node
+---vehicle temporaryStationaryDriverVehicle
+function GrainTransportAIDriver:setTemporaryGoalNode(node,temporaryStationaryDriverVehicle)
+	self.temporaryReadyToLoadManualAtStartNode = node
+	self.temporaryStationaryDriverVehicle = temporaryStationaryDriverVehicle
+	self:updateTemporaryGoalNode()
+	--create a temporary course to drive parallel
+	self.tempCourse = self:getStraightForwardCourse()
+	self:startCourse(self.tempCourse,1)
+end
+
+function GrainTransportAIDriver:resetTemporaryGoalNode()
+	self.temporaryReadyToLoadManualAtStartNode = nil
+	self.temporaryStationaryDriverVehicle = nil
+	--if we are on a temporary course continue on the next closest course point
+	if self.tempCourse then 
+		local ixClosest, _, ixClosestRightDirection, _ = self.mainCourse:getNearestWaypoints(AIDriverUtil.getDirectionNode(self.vehicle))
+		self:startCourse(self.mainCourse,ixClosestRightDirection)
+		self.tempCourse = nil
+	end
+end
+
+--refreshes the dsitance check form the temp goal to the nextClosestFillRootNode 
+--as the stationary driver porbably has moved
+function GrainTransportAIDriver:updateTemporaryGoalNode()
+	self.nextClosestExactFillRootNodeDistance = math.huge	
+end
+
+function GrainTransportAIDriver:hasTemporaryGoalNode()
+	return self.temporaryReadyToLoadManualAtStartNode ~=nil
+end
+
+function GrainTransportAIDriver:getTemporyGoalNodeSpeed()
+	return 1
+end
+
+function GrainTransportAIDriver:getNextClosestExactFillRootNode()
+	return self.nextClosestExactFillRootNode
+end
+
+function GrainTransportAIDriver:updateOffset()
+	if self:hasTemporaryGoalNode() and self.nextClosestExactFillRootNode then 
+
+	else
+		AIDriver.updateOffset(self)
+	end
+end
+
+function GrainTransportAIDriver:getReadyToLoadManualAtStartNodeSpeed()
+	return self.temporaryReadyToLoadManualAtStartNode and self:getTemporyGoalNodeSpeed() or 3
+end
+
+function GrainTransportAIDriver:isTrafficConflictDetectionEnabled()
+	return self.trafficConflictDetectionEnabled and self.loadingMode and self.loadingMode.properties.checkForTrafficConflict
+end
+
+function GrainTransportAIDriver:isProximitySwerveEnabled()
+	return self.loadingMode and self.loadingMode.properties.enableProximitySwerve
+end
+
+function GrainTransportAIDriver:isProximitySpeedControlEnabled()
+	return self.loadingMode and self.loadingMode.properties.enableProximitySpeedControl
+end
+
+-- create a temporary course to drive parallel to the temporaryStationaryDriverVehicle
+function GrainTransportAIDriver:getStraightForwardCourse(length)
+	local l = length or 100
+	local tempGoalNode = createTransformGroup("tempGoalNode")
+	local x,_,z = getWorldTranslation(self.temporaryReadyToLoadManualAtStartNode)
+	local dx,dy,dz = getRotation(getParent(AIDriverUtil.getDirectionNode(self.temporaryStationaryDriverVehicle)))
+	local _,y,_ = getWorldTranslation(self.vehicle.rootNode)
+	setTranslation(tempGoalNode,x,y,z)
+	setRotation(tempGoalNode,dx,dy,dz)
+	local course = Course.createFromNode(self.vehicle, tempGoalNode, 0, 0, l, 5, false)
+	courseplay.destroyNode( tempGoalNode )
+	return course
 end

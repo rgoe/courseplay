@@ -1222,6 +1222,9 @@ function courseplay.hud:updatePageContent(vehicle, page)
 					for i=1,4 do 
 						vehicle.cp.hud.content.pages[page][i][2].text = texts[i]
 					end
+				elseif entry.functionToCall == 'unloadLeftOrRight:changeByX' then
+					vehicle.cp.hud.content.pages[page][line][1].text = vehicle.cp.settings.unloadLeftOrRight:getLabel()
+					vehicle.cp.hud.content.pages[page][line][2].text = vehicle.cp.settings.unloadLeftOrRight:getText()
 				end
 			end		
 		end
@@ -2282,6 +2285,7 @@ function courseplay.hud:setCombineAIDriverContent(vehicle)
 	self:addRowButton(vehicle,nil,'startStopCourseplayer', 0, 2, 1 )
 	self:addRowButton(vehicle,nil,'sendCourseplayerHome', 0, 3, 1 )
 	if vehicle.cp.isChopper then	
+		--if courselpay side is still used, should switch this for: unloadLeftOrRightSetting!
 		self:addRowButton(vehicle,nil,'switchCourseplayerSide', 0, 4, 1 )
 		self:addRowButton(vehicle,vehicle.cp.settings.turnStage,'toggle', 0, 5, 1 )
 	else
@@ -2364,6 +2368,13 @@ function courseplay.hud:setTriggerHandlerShovelModeAIDriverContent(vehicle)
 	self:addRowButton(vehicle,vehicle.cp.settings.siloSelectedFillTypeShovelModeDriver,'addFilltype', 9, 5, 1 )
 	self:setupSiloSelectedFillTypeList(vehicle,vehicle.cp.settings.siloSelectedFillTypeShovelModeDriver, 9, 6, 8, 1,true)
 	self:addRowButton(vehicle,vehicle.cp.settings.shovelModeAIDriverTriggerHandlerIsActive,'toggle', 9, 8, 1 )
+end
+
+function courseplay.hud:setStationaryShovelAIDriverContent(vehicle)
+	--page 9
+	self:enablePageButton(vehicle, 9)
+	self:addSettingsRow(vehicle,nil,'changeWorkWidth',9,1,1, 0.1)
+--	self:addRowButton(vehicle,vehicle.cp.settings.unloadLeftOrRight,'changeByX',9,2,1)
 end
 
 function courseplay.hud:setLevelCompactAIDriverContent(vehicle)

@@ -520,6 +520,40 @@ function CourseGeneratorScreen:draw()
 		self.coursePlot:setSize(self.ingameMap.size[1], self.ingameMap.size[2])
 		self.coursePlot:draw()
 	end
+	if self.vehicle.cp.courseGeneratorSettings.showSeedCalculator:is(true) then
+		self:drawSeedCalculator(self.ingameMap.absPosition[ 1 ],self.ingameMap.absPosition[2]+0.025)
+	end
+end
+
+---a very basic and simple way to have an seed calculator in the course generator
+function CourseGeneratorScreen:drawSeedCalculator(xPos,yPos)
+	-- do have a valid field selected ?
+	local currentFieldNumber = self.vehicle.cp.fieldEdge.selectedField.fieldNum
+	if currentFieldNumber ~= 0 then 
+		local fieldAreaHa = courseplay.fields.fieldData[currentFieldNumber].areaHa
+		local fieldAreaSqm = courseplay.fields.fieldData[currentFieldNumber].areaSqm
+		setTextColor(0, 1, 1, 1)
+		setTextBold(true)
+		-- draw field size at the bottom
+		renderText(self.ingameMap.absPosition[ 1 ],self.ingameMap.absPosition[ 2 ],0.015,string.format("Field size: %.2f Ha",fieldAreaHa))
+		-- draw all the sprayTypes and fruitType  
+		for _,sprayType in pairs(g_sprayTypeManager:getSprayTypes()) do
+			local litersPerSecond = sprayType.litersPerSecond
+			local totalLiters = litersPerSecond*fieldAreaHa*36000
+			local name = sprayType.fillType.title
+			renderText(xPos,yPos,0.015,string.format("%s : %d %s",name,math.ceil(totalLiters),g_i18n:getText("unit_liter")))
+			yPos = yPos+0.025
+		end
+		for _,fruitType in pairs(g_fruitTypeManager:getFruitTypes()) do
+			if fruitType.allowsSeeding then
+				local seedUsagePerSqm = fruitType.seedUsagePerSqm
+				local totalSeedUsage = seedUsagePerSqm*fieldAreaSqm
+				local name = fruitType.fillType.title
+				renderText(xPos,yPos,0.015,string.format("%s : %d %s",name,math.ceil(totalSeedUsage),g_i18n:getText("unit_liter")))
+				yPos = yPos+0.025
+			end        
+		end
+	end
 end
 
 function CourseGeneratorScreen:onOpenCenterMode( element, parameter )
@@ -543,6 +577,20 @@ end
 
 function CourseGeneratorScreen:onClickNumberOfRowsPerLand(state)
 	local setting = self.vehicle.cp.courseGeneratorSettings.numberOfRowsPerLand
+	if setting:getGuiElement() then
+		setting:setToIx(setting:getGuiElement():getState())
+	end
+end
+
+function CourseGeneratorScreen:onOpenShowSeedCalculator( element, parameter )
+	local setting = self.vehicle.cp.courseGeneratorSettings.showSeedCalculator
+	setting:setGuiElement(element)
+	element:setTexts(setting:getGuiElementTexts())
+	element:setState(setting:getGuiElementState())
+end
+
+function CourseGeneratorScreen:onClickShowSeedCalculator(state)
+	local setting = self.vehicle.cp.courseGeneratorSettings.showSeedCalculator
 	if setting:getGuiElement() then
 		setting:setToIx(setting:getGuiElement():getState())
 	end

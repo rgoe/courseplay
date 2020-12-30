@@ -157,16 +157,13 @@ function LevelCompactAIDriver:foundUnloaderInRadius(r,setWaiting)
 								isOkayToStop = false
 							end
 						end
-						
 						if setWaiting and isOkayToStop then 
---							vehicle.cp.driver.triggerHandler:setWaitingForUnloadReady()
 							vehicle.cp.driver:hold()
 							vehicle.cp.driver:setInfoText("WAITING_FOR_LEVELCOMPACTAIDRIVER")
 							vehicle.cp.driver:disableTrafficConflictDetection()
 						else 
 							vehicle.cp.driver:clearInfoText("WAITING_FOR_LEVELCOMPACTAIDRIVER")
 							vehicle.cp.driver:enableTrafficConflictDetection()
---							vehicle.cp.driver.triggerHandler:resetWaitingForUnloadReady()
 						end
 						self:debugSparse("found cp driver : %s",nameNum(vehicle))
 						return isOkayToStop
@@ -305,7 +302,6 @@ function LevelCompactAIDriver:driveSiloLevel(dt)
 	
 	
 	elseif self.fillUpState == self.states.PULLBACK then
-		renderText(0.2,0.365,0.02,"self:drivePull(dt)")
 		self:moveShield('up',dt)
 		if self:isStuck() then
 			self.fillUpState = self.states.PUSH
@@ -363,9 +359,9 @@ function LevelCompactAIDriver:drivePush(dt)
 	self:updateTarget()
 	--speed
 	if self:isNearEnd() then
-		refSpeed = math.min(10,vehicle.cp.speeds.bunkerSilo)
+		refSpeed = math.min(10,vehicle.cp.settings.bunkerSpeed:get())
 	else
-		refSpeed = math.min(20,vehicle.cp.speeds.bunkerSilo)
+		refSpeed = math.min(20,vehicle.cp.settings.bunkerSpeed:get())
 	end		
 	--drive
 	local lx, lz = AIVehicleUtil.getDriveDirection(self.vehicle.cp.directionNode, cx,cy,cz);
@@ -380,7 +376,7 @@ end
 function LevelCompactAIDriver:drivePull(dt)
 	local pullDone = false
 	local fwd = true
-	local refSpeed = math.min(20,self.vehicle.cp.speeds.bunkerSilo)
+	local refSpeed = math.min(20,self.vehicle.cp.settings.bunkerSpeed:get())
 	local allowedToDrive = true 
 	local cx,cy,cz = self.course:getWaypointPosition(self.course:getNumberOfWaypoints())
 	local lx, lz = AIVehicleUtil.getDriveDirection(self.vehicle.cp.directionNode, cx,cy,cz);
@@ -389,6 +385,11 @@ function LevelCompactAIDriver:drivePull(dt)
 	if lz < 0 then
 		pullDone = true
 	end
+	if self.hasFoundUnloaders then
+		self:changeLevelState(self.states.DRIVE_TO_PARKING)
+		self:deleteBestTarget()
+		return false
+	end
 --	self:drawMap()
 	return pullDone
 end
@@ -396,7 +397,7 @@ end
 ---make sure we start with enough distance to the first bunkersilo target, so we don't drive into the silo wall 
 ---currently we just drive 10 m ahead and then start normaly drive the buker course
 function LevelCompactAIDriver:driveToPreStartPosition(dt)
-	local refSpeed = math.min(20,self.vehicle.cp.speeds.bunkerSilo)
+	local refSpeed = math.min(20,self.vehicle.cp.settings.bunkerSpeed:get())
 	self:moveShield('up',dt)
 	if self.tempTarget == nil then
 		local gx,gy,gz = localToWorld(self.vehicle.rootNode,0,0,10)
@@ -588,7 +589,6 @@ function LevelCompactAIDriver:checkSilo()
 		if silo then 
 			self.bunkerSiloManager = BunkerSiloManager(self.vehicle,silo,self:getWorkWidth(),self:getValidBackImplement())
 		end
-	
 	end
 	if not self.bunkerSiloManager then
 		courseplay:setInfoText(self.vehicle, courseplay:loc('COURSEPLAY_MODE10_NOSILO'));
@@ -619,7 +619,7 @@ end
 function LevelCompactAIDriver:moveShield(moveDir,dt,fixHeight)
 	local leveler = self.leveler
 	local moveFinished = false
-	if leveler.spec_attacherJointControl ~= nil then
+	if leveler and leveler.spec_attacherJointControl ~= nil then
 		local spec = leveler.spec_attacherJointControl
 		local jointDesc = spec.jointDesc
 		if moveDir == "down" then
@@ -819,7 +819,7 @@ end
 
 function LevelCompactAIDriver:debugRouting()
 	if self:isDebugActive() and self.bunkerSiloManager then
-		self.bunkerSiloManager:debugRouting(self.bestTarget,self.tempTarget)
+		self.bunkerSiloManager:debugRouting(self.bestTarget)
 	end
 end
 
@@ -858,9 +858,11 @@ function LevelCompactAIDriver:getWorkWidth()
 	return math.max(self.workWidth,self.vehicle.cp.workWidth)
 end
 
+---if we have a leveler return the leveler.rootNode, else return the backMakerNode
+---@return node self.leveler.rootNode or backMakerNode
 function LevelCompactAIDriver:getValidBackImplement()
-	local backImplement = AIDriverUtil.getLastAttachedImplement(self.vehicle)
-	return self.leveler or backImplement
+	local backMarkerNode = self:getBackMarkerNode(self.vehicle)
+	return self.leveler and self.leveler.rootNode or backMarkerNode
 end
 
 function LevelCompactAIDriver:isDebugActive()

@@ -101,6 +101,7 @@ local function initialize()
 		'LevelCompactAIDriver',
 		'ShovelModeAIDriver',
 		'TriggerShovelModeAIDriver',
+		'StationaryShovelAIDriver',
 		'Conflict',
 		'AITurn',
 		'course-generator/geo',

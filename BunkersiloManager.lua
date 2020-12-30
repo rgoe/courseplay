@@ -27,17 +27,20 @@ widthNode -->	|				|	<-- startNode (sx,_,sz)
 
 ]]--
 
+---TODO: fix this parameter object: to a node for all drivers
+---		 not an implement
+
 ---@param vehicle vehicle
 ---@param Silo BunkerSilo or simulated HeapSilo
 ---@param float workwidth
----@param implement relevant workTool
+---@param node targetNode is either the front/back node of the implement used to check to update the bestTarget
 ---@param boolean is the silo a heap ?
-function BunkerSiloManager:init(vehicle, Silo, width, object,isHeap)
+function BunkerSiloManager:init(vehicle, Silo, width, targetNode,isHeap)
 	print("BunkerSiloManager: init()")
 	self.siloMap = self:createBunkerSiloMap(vehicle, Silo, width,isHeap)
 	self.silo = Silo
 	self.vehicle = vehicle
-	self.object = object
+	self.targetNode = targetNode
 end
 
 ---creating the relevant siloMap
@@ -258,11 +261,10 @@ function BunkerSiloManager:isAtEnd(bestTarget)
 	if not self.siloMap or not bestTarget then 
 		return false
 	end
-	
 	local targetUnit = self.siloMap[bestTarget.line][bestTarget.column]
 	local cx ,cz = targetUnit.cx, targetUnit.cz
 	local cy = getTerrainHeightAtWorldPos(g_currentMission.terrainRootNode, cx, 1, cz);
-	local x,y,z = getWorldTranslation(self.object.rootNode)
+	local x,y,z = getWorldTranslation(self.targetNode)
 	local distance2Target =  courseplay:distance(x,z, cx, cz) --distance from shovel to target
 	if distance2Target < 1 then
 		if bestTarget.line == #self.siloMap then
@@ -297,10 +299,10 @@ function BunkerSiloManager:getBestTargetFillUnitFillUp(bestTarget)
 				end
 				if column == #line and mostFillLevelAtLine > 0 then
 					fillingTarget = {
-										line = lineIndex;
-										column = mostFillLevelIndex;
-										empty = false;
-												}
+						line = lineIndex;
+						column = mostFillLevelIndex;
+						empty = false;
+					}
 					stopSearching = true
 					break
 				end
@@ -308,10 +310,10 @@ function BunkerSiloManager:getBestTargetFillUnitFillUp(bestTarget)
 		end
 		if mostFillLevelAtLine == 0 then
 			fillingTarget = {
-										line = 1;
-										column = 1;
-										empty = true;
-												}
+				line = 1;
+				column = 1;
+				empty = true;
+			}
 		end
 		
 		bestTarget = fillingTarget
@@ -335,7 +337,7 @@ function BunkerSiloManager:updateTarget(bestTarget)
 	local targetUnit = self.siloMap[bestTarget.line][bestTarget.column]
 	local cx ,cz = targetUnit.cx, targetUnit.cz
 	local cy = getTerrainHeightAtWorldPos(g_currentMission.terrainRootNode, cx, 1, cz);
-	local x,y,z = getWorldTranslation(self.object.rootNode)
+	local x,y,z = getWorldTranslation(self.targetNode)
 	local distance2Target =  courseplay:distance(x,z, cx, cz) --distance from shovel to target
 	if math.abs(distance2Target) < 1 then
 		bestTarget.line = math.min(bestTarget.line + 1, #self.siloMap)
@@ -552,6 +554,110 @@ function BunkerSiloManagerUtil.getHeapCoords(vehicle)
 	
 	return bunker
 end
+
+---check for heaps and simulate a bunkerSiloMap for the found heap
+---@param vehicle vehicle of the driver
+---@param node start node
+---@param float z offset
+---return targetSilo a simulated bunkerSilo version of the heap
+function BunkerSiloManagerUtil.getHeapCoordsByStartNode(vehicle,startPoint,maxDistance)
+	local p1x,p1z,p2x,p2z,p1y,p2y = 0,0,0,0,0,0
+
+	p1x,_,p1z = getTranslation(startPoint)
+	p2x,_,p2z = localToWorld(startPoint,0,0,maxDistance)
+	p1y = getTerrainHeightAtWorldPos(g_currentMission.terrainRootNode, p1x, 1, p1z);
+	p2y = getTerrainHeightAtWorldPos(g_currentMission.terrainRootNode, p2x, 1, p2z);
+	local heapFillType = DensityMapHeightUtil.getFillTypeAtLine(p1x, p1y, p1z, p2x, p2y, p2z, 5)
+	
+	if not heapFillType or heapFillType == FillType.UNKNOWN then 
+		return 
+	end
+	courseplay:debug(string.format("%s: heap with %s found",nameNum(vehicle),tostring(heapFillType)),10)
+	--create temp node 
+	local point = createTransformGroup("cpTempHeapFindingPoint");
+	link(g_currentMission.terrainRootNode, point);
+
+	-- Rotate it in the right direction
+	local dx,_,dz, distance = courseplay:getWorldDirection(p1x,p1y,p1z,p2x,p2y,p2z);
+	
+	setTranslation(point,p1x,p1y,p1z);
+	local yRot = MathUtil.getYRotationFromDirection(dx, dz);
+	setRotation(point, 0, yRot, 0);
+
+	-- move the line to find out the size of the heap
+	
+	--find maxX 
+	local stepSize = 0.1
+	local searchWidth = 0.1
+	local maxX = 0
+	local tempStartX, tempStartZ,tempHeightX,tempHeightZ = 0,0,0,0;
+	for i=stepSize,250,stepSize do
+		tempStartX,tempStartY,tempStartZ = localToWorld(point,i,0,0)
+		tempHeightX,tempHeightY,tempHeightZ= localToWorld(point,i,0,distance*2)
+		local fillType = DensityMapHeightUtil.getFillTypeAtLine(tempStartX, tempStartY, tempStartZ,tempHeightX,tempHeightY,tempHeightZ, searchWidth)
+		--print(string.format("fillType:%s distance: %.1f",tostring(fillType),i))	
+		if fillType ~= heapFillType then
+			maxX = i-stepSize
+			courseplay:debug("maxX= "..tostring(maxX),10)
+			break
+		end
+	end
+	
+	--find minX 
+	local minX = 0
+	local tempStartX, tempStartZ,tempHeightX,tempHeightZ = 0,0,0,0;
+	for i=stepSize,250,stepSize do
+		tempStartX,tempStartY,tempStartZ = localToWorld(point,-i,0,0)
+		tempHeightX,tempHeightY,tempHeightZ= localToWorld(point,-i,0,distance*2)
+		local fillType = DensityMapHeightUtil.getFillTypeAtLine(tempStartX,tempStartY, tempStartZ,tempHeightX,tempHeightY,tempHeightZ, searchWidth)
+		--print(string.format("fillType:%s distance: %.1f",tostring(fillType),i))	
+		if fillType ~= heapFillType then
+			minX = i-stepSize
+			courseplay:debug("minX= "..tostring(minX),10)
+			break
+		end
+	end
+	
+	--find minZ and maxZ
+	local foundHeap = false
+	local minZ, maxZ = 0,0
+	for i=0,250,stepSize do
+		tempStartX,tempStartY,tempStartZ = localToWorld(point,maxX,0,i)
+		tempHeightX,tempHeightY,tempHeightZ= localToWorld(point,-minX,0,i)
+		local fillType = DensityMapHeightUtil.getFillTypeAtLine(tempStartX, tempStartY, tempStartZ,tempHeightX,tempHeightY,tempHeightZ, searchWidth)
+		if not foundHeap then
+			if fillType == heapFillType then
+				foundHeap = true
+				minZ = i-stepSize
+				courseplay:debug("minZ= "..tostring(minZ),10)
+			end
+		else
+			if fillType ~= heapFillType then
+				maxZ = i-stepSize+1
+				courseplay:debug("maxZ= "..tostring(maxZ),10)
+				break
+			end
+		end	
+	end
+	
+	--set found values into bunker table and return it
+	local bunker = {}
+	bunker.bunkerSiloArea = {}
+	bunker.bunkerSiloArea.sx,_,bunker.bunkerSiloArea.sz = localToWorld(point,maxX,0,minZ);
+	bunker.bunkerSiloArea.wx,_,bunker.bunkerSiloArea.wz = localToWorld(point,-minX,0,minZ)
+	bunker.bunkerSiloArea.hx,_,bunker.bunkerSiloArea.hz = localToWorld(point,maxX,0,maxZ)
+	bunker.type = "heap"
+
+		
+	-- Clean up the temporary node.
+	unlink(point);
+	delete(point);
+	
+	
+	return bunker
+end
+
+
 
 ---get the best column to fill
 ---@param course course of the driver
