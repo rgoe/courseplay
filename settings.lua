@@ -1299,6 +1299,10 @@ function Setting:set(value)
 	self.value = value
 end
 
+function Setting:changeByX(x)
+	self:set(x)
+end
+
 function Setting:onChange()
 	-- setting specific implementation in the derived classes
 end
@@ -1328,6 +1332,19 @@ end
 --- Should this setting be disabled on the GUI?
 function Setting:isDisabled()
 	return false
+end
+
+function Setting:isVisible()
+	return true
+end
+
+function Setting:hudButtonCallFunction(parameter)
+	self:changeByX(parameter)
+end
+
+function Setting:hudButtonHelpCallFunction(parameter)
+	local help = string.format("%s help: /n%s",self.label,self.label.."_HELP")
+
 end
 
 ---@class FloatSetting
@@ -1881,6 +1898,10 @@ function AutoDriveModeSetting:useForParkVehicle()
 	return self:is(AutoDriveModeSetting.PARK) or self:is(AutoDriveModeSetting.UNLOAD_OR_REFILL_PARK)
 end
 
+function AutoDriveModeSetting:isDisabled()
+	return not self.vehicle.cp.canDrive or not self.vehicle.spec_autodrive
+end
+
 --- Starting point setting (at which waypoint should the vehicle start the course)
 ---@class StartingPointSetting : SettingList
 StartingPointSetting = CpObject(SettingList)
@@ -1919,6 +1940,10 @@ function StartingPointSetting:checkAndSetValidValue(new)
 	else
 		return SettingList.checkAndSetValidValue(self, new)
 	end
+end
+
+function StartingPointSetting:isDisabled()
+	return self.vehicle:getIsCourseplayDriving() or not self.vehicle.cp.canDrive
 end
 
 ---@class StartingLocationSetting : SettingList
@@ -2138,6 +2163,10 @@ function ReturnToFirstPointSetting:isReleaseDriverActive()
 	return self:get() == self.RELEASE_DRIVER or self:get() == self.RETURN_TO_START_AND_RELEASE_DRIVER
 end
 
+function ReturnToFirstPointSetting:isDisabled()
+	return not self.vehicle.cp.canDrive
+end
+
 --- Setting to select a field
 ---@class FieldNumberSetting : SettingList
 FieldNumberSetting = CpObject(SettingList)
@@ -2203,6 +2232,10 @@ function SearchCombineOnFieldSetting:changeByX(x)
 		return
 	end
 	return FieldNumberSetting.changeByX(self,x)
+end
+
+function SearchCombineOnFieldSetting:isDisabled()
+	return not self.vehicle.cp.searchCombineAutomatically or courseplay.fields.numAvailableFields <=0
 end
 
 --- SelectedCombineToUnload on field
@@ -2411,6 +2444,10 @@ function AutomaticUnloadingOnFieldSetting:init(vehicle)
 	BooleanSetting.init(self, 'automaticUnloadingOnField', 'COURSEPLAY_UNLOADING_ON_FIELD', 'COURSEPLAY_UNLOADING_ON_FIELD',vehicle, {'COURSEPLAY_MANUAL','COURSEPLAY_AUTOMATIC'})
 	self:set(false)
 end
+
+function AutomaticUnloadingOnFieldSetting:isDisabled()
+	return self.vehicle.cp.hasUnloadingRefillingCourse
+end	
 
 ---@class DriverPriorityUseFillLevelSetting : BooleanSetting
 DriverPriorityUseFillLevelSetting = CpObject(BooleanSetting)
@@ -2625,6 +2662,10 @@ function CombineWantsCourseplayerSetting:init(vehicle)
 	self:set(false)
 end
 
+function CombineWantsCourseplayerSetting:isDisabled()
+	return g_combineUnloadManager:getHasUnloaders(self.vehicle)
+end
+
 ---@class KeepUnloadingUntilEndOfRow : BooleanSetting
 KeepUnloadingUntilEndOfRow = CpObject(BooleanSetting)
 function KeepUnloadingUntilEndOfRow:init(vehicle)
@@ -2817,10 +2858,14 @@ function SiloSelectedFillTypeSetting:getTexts(index)
 		local runCounterText = data.runCounter and data.runCounter.."/"..self.MAX_RUNS or ""
 		local maxFillLevelText = data.maxFillLevel and data.maxFillLevel.."%" or ""
 		local minFillLevelText = data.minFillLevel and data.minFillLevel.."%" or ""
-		return runCounterText,maxFillLevelText,minFillLevelText
+		return string.format("% 6s  % 6s  % 6s",runCounterText,maxFillLevelText,minFillLevelText)
 	else
-		return "","",""
+		return ""
 	end
+end
+
+function SiloSelectedFillTypeSetting:getLabelText()
+	return string.format("%6s  %6s  %6s","count","max","min")
 end
 
 function SiloSelectedFillTypeSetting:incrementRunCounter(index)
@@ -3057,6 +3102,10 @@ function TurnStageSetting:init(vehicle)
 	self:set(false)
 end
 
+function TurnStageSetting:isDisabled() 
+	return not g_combineUnloadManager:getHasUnloaders(self.vehicle) or self.vehicle:getIsCourseplayDriving() 
+end
+
 ---@class RefillUntilPctSetting : PercentageSettingList
 RefillUntilPctSetting = CpObject(PercentageSettingList)
 function RefillUntilPctSetting:init(vehicle)
@@ -3071,6 +3120,10 @@ function DriveOnAtFillLevelSetting:init(vehicle)
 	self:set(90)
 end
 
+function DriveOnAtFillLevelSetting:isDisabled()
+	return self.vehicle.cp.settings.seperateFillTypeLoading:isActive()
+end
+
 ---@class FollowAtFillLevelSetting : PercentageSettingList
 FollowAtFillLevelSetting = CpObject(PercentageSettingList)
 function FollowAtFillLevelSetting:init(vehicle)
@@ -3083,6 +3136,10 @@ MoveOnAtFillLevelSetting = CpObject(PercentageSettingList)
 function MoveOnAtFillLevelSetting:init(vehicle)
 	PercentageSettingList.init(self, 'moveOnAtFillLevel', 'COURSEPLAY_MOVE_ON_AT', 'COURSEPLAY_MOVE_ON_AT', vehicle)
 	self:set(5)
+end
+
+function MoveOnAtFillLevelSetting:isDisabled()
+	return self.vehicle.cp.settings.seperateFillTypeLoading:isActive()
 end
 
 --seperate SiloSelectedFillTypeSettings to save their current state
@@ -3209,6 +3266,10 @@ function SeperateFillTypeLoadingSetting:isActive()
 	if self.vehicle.cp.driver:is_a(GrainTransportAIDriver) and not self.vehicle.cp.driver:getSiloSelectedFillTypeSetting():isEmpty() then 
 		return true
 	end
+end
+
+function SeperateFillTypeLoadingSetting:isDisabled()
+	return not self:isActive()
 end
 
 ---@class ForcedToStopSetting : BooleanSetting
