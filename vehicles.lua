@@ -1060,9 +1060,6 @@ function courseplay:getVehicleTurnRadius(vehicle)
 		if vehicle.maxTurningRadius then
 			turnRadius = vehicle.maxTurningRadius;
 			courseplay:debug(('%s -> TurnRadius: Using Giants maxTurningRadius: %.2fm'):format(nameNum(vehicle), vehicle.maxTurningRadius), courseplay.DBG_IMPLEMENTS);
-		elseif g_vehicleConfigurations:get(vehicle, 'turnRadius') then
-			turnRadius = g_vehicleConfigurations:get(vehicle, 'turnRadius')
-			courseplay.debugVehicle(courseplay.DBG_IMPLEMENTS, vehicle, '  turnRadius set from configfile to %.1f', radius)
 		else
 			turnRadius = TR;
 			courseplay:debug(('%s -> TurnRadius: (Steering Type: %s) Calculated turnRadius set to %.2fm'):format(nameNum(vehicle), steeringType, turnRadius), courseplay.DBG_IMPLEMENTS);
